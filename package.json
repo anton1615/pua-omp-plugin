@@ -1,0 +1,16 @@
+{
+  "name": "pua-omp-plugin",
+  "version": "3.5.1-omp.1",
+  "description": "PUA high-agency governance extension + skill for omp (Oh My Pi). Derived from tanweai/pua with string[]-aware before_agent_start.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anton1615/pua-omp-plugin.git"
+  },
+  "keywords": ["omp-plugin", "omp", "pua", "governance"],
+  "files": ["extensions", "skills", "README.md", "LICENSE"],
+  "omp": {
+    "extensions": ["./extensions/pua/index.ts"]
+  }
+}
