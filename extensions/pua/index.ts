@@ -243,14 +243,15 @@ export default function puaPiExtension(pi: ExtensionAPI) {
     config = readConfig();
     if (config.always_on === false) return;
     if (!WRITE_TOOLS.has(String(event?.toolName))) return;
-    for (const raw of toolPaths(event?.input)) {
-      const path = raw.replace(/\\/g, "/");
-      if (TEST_PATH.test(path)) {
-        return { additionalContext: `[PUA] Test path edit: ${path}. Keep existing assertions intact; do not weaken a test to manufacture a pass.` };
-      }
+    const paths = toolPaths(event?.input).map((raw) => raw.replace(/\\/g, "/"));
+    for (const path of paths) {
       for (const [pattern, reason] of BLOCK_PATTERNS) {
         if (pattern.test(path)) return { block: true, reason: `${reason} (${path})` };
       }
+    }
+    const testPath = paths.find((path) => TEST_PATH.test(path));
+    if (testPath) {
+      return { additionalContext: `[PUA] Test path edit: ${testPath}. Keep existing assertions intact; do not weaken a test to manufacture a pass.` };
     }
     return;
   });

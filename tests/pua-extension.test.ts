@@ -143,6 +143,11 @@ describe("U3 integrity guard", () => {
     expect(result?.block).toBe(true);
   });
 
+  test("a protected path outranks a test path in one call", () => {
+    const result = guard("ast_edit", { paths: ["tests/a.ts", ".github/workflows/ci.yml"] });
+    expect(result?.block).toBe(true);
+  });
+
   test(".env blocks", () => {
     expect(guard("write", { path: ".env" })?.block).toBe(true);
   });
