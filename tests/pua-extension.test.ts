@@ -140,6 +140,21 @@ describe("U3 integrity guard", () => {
     expect(result?.block).toBe(true);
   });
 
+  test("a hashline edit naming a CI workflow blocks", () => {
+    const result = guard("edit", { input: "[.github/workflows/ci.yml#1A2B]\nPUT 1.=1:\n+run: true" });
+    expect(result?.block).toBe(true);
+  });
+
+  test("a hashline edit of a test file is advisory", () => {
+    const result = guard("edit", { input: "[tests/x.test.ts#1A2B]\nPUT 1.=1:\n+x" });
+    expect(result?.block).toBeUndefined();
+    expect(result?.additionalContext).toContain("tests/x.test.ts");
+  });
+
+  test("a copied hashline wrapper around write's path still blocks", () => {
+    expect(guard("write", { path: "[.github/workflows/ci.yml#1A2B]" })?.block).toBe(true);
+  });
+
   test("a protected path outranks a test path in one call", () => {
     const result = guard("ast_edit", { paths: ["tests/a.ts", ".github/workflows/ci.yml"] });
     expect(result?.block).toBe(true);
@@ -191,6 +206,16 @@ describe("U4 compaction state and stop reminder", () => {
     writeFileSync(CHECKPOINT, JSON.stringify({ failures: 1, saved_at: 1 }) + "\n", "utf8");
     emit("session_start");
     expect(start("hello")?.systemPrompt[1]).toContain("5 recent failures");
+  });
+
+  test("the shared counter wins over a stale in-memory snapshot", () => {
+    writeFileSync(COUNTER, "2\n", "utf8");
+    emit("session_start");
+    writeFileSync(COUNTER, "9\n", "utf8");
+    expect(start("hello")?.systemPrompt[1]).toContain("9 recent failures");
+    emit("session_before_compact", {});
+    emit("session_start");
+    expect(start("hello")?.systemPrompt[1]).toContain("9 recent failures");
   });
 
   test("the stop reminder fires once per session", () => {

@@ -47,8 +47,8 @@ pressure that successes never reset. This extension ports that policy:
 - **Compaction state.** `session_before_compact` writes
   `~/.pua/checkpoint.json` (`level`, `failures`, `flavor`, `saved_at`); a newer
   checkpoint than the live counter is restored on session start.
-- **Stop reminder.** `session_stop` emits one visible reminder per session and
-  records no rating.
+- **Stop reminder.** `session_stop` (the per-turn stop hook) emits one visible
+  completion reminder, at the first stop of a session, and records no rating.
 
 ### Documented divergences from the Claude hooks
 
@@ -56,6 +56,7 @@ pressure that successes never reset. This extension ports that policy:
 |---|---|
 | Test-file writes are advisory, not blocked | omp runs (including this repo's own `ce-work` runs) author tests; a hard block makes the plugin unusable. Evidence that would flip this: a run where the model weakened an existing assertion after the warning. |
 | Shell-mediated writes are not intercepted | The guard inspects tools that name a file; a `bash` redirect into a protected path passes. Porting the Claude mutating-command heuristic is deferred. |
+| `ast_edit` rewrites apply unguarded | `ast_edit` only previews; the apply pass is a `write` to `xd://resolve`, which names staged state rather than a file, so a globbed rewrite can reach a protected path. |
 | No blocking stop loop, subagent teardown, or survey rating | omp's `session_stop` continuation cap, the absence of a subagent-stop event, and the interactive rating flow are out of scope for the extension. |
 
 ## Install

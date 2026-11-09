@@ -47,6 +47,7 @@ The Claude Code plugin gates its context on user frustration (`hooks/frustration
 - Deferred: blocking stop loop (`pua-loop-hook.sh` gate protocol); omp's `session_stop` continuation cap of 8 makes the Claude loop semantics unavailable.
 - Deferred: interactive `/pua:survey` rating flow and `feedback.jsonl` recording.
 - Deferred: shell-mediated writes. A `bash` redirect into a protected path is not intercepted; the guard inspects tools that name a file, while the Claude guard also parses shell commands. Porting that heuristic is deferred until a run shows a protected file reached through the shell.
+- Deferred: `ast_edit` apply. `ast_edit` only previews; the apply pass is a `write` to `xd://resolve`, whose target is staged state rather than a path, so the guard cannot see the rewritten file.
 - Considered and not built: hard-blocking test-file writes. omp implementation runs (including this repository's own `ce-work` runs) author tests, so a hard block makes the plugin unusable; an advisory warning covers the observed risk without the harm. Evidence that would change this: a run where the model weakened an existing assertion after the warning.
 
 ---
@@ -131,7 +132,7 @@ U1 and U2 are independent of U3 and U4. U4 reads the counter U2 writes; land U2 
 - **Dependencies:** none — it shares the config read and enabled gate with U1 but needs no ordering.
 - **Files:** `extensions/pua/index.ts`, `tests/pua-extension.test.ts`
 - **Approach:**
-  1. Register `tool_call`; collect every target path the input names: `path` / `file_path` for `edit` and `write`, the `*** Add File` / `*** Update File` / `*** Move to` headers inside an edit tool's patch payload, and `path` / `paths` for `ast_edit`.
+  1. Register `tool_call`; collect every target path the input names: `path` / `file_path` for `edit` and `write` (stripping a copied `[path#TAG]` wrapper), the hashline `[PATH#TAG]` section headers and `MV` destinations of the default edit payload, the `*** Add File` / `*** Update File` / `*** Move to` headers of patch-mode input, and `path` / `paths` for `ast_edit`.
   2. Match each collected path against the ported protected-write and contamination tables.
   3. Return `{ block: true, reason }` for CI, verifier, contamination, secret, and status/progress matches; return `{ additionalContext }` for test-path matches.
   - Keep the pattern sources byte-identical to `hooks/integrity-guard.sh` so a later diff against upstream is mechanical.
@@ -142,6 +143,7 @@ U1 and U2 are independent of U3 and U4. U4 reads the counter U2 writes; land U2 
   - Editing `src/index.ts` returns neither.
   - Editing a path under a `scoring/` directory blocks.
   - An edit whose payload names `.github/workflows/ci.yml` (patch-style input, no `path` field) also blocks.
+  - A default hashline edit (`[.github/workflows/ci.yml#1A2B]` payload) blocks, and the same shape for a test file is advisory.
   - `.env` blocks.
   - `always_on: false` returns neither for every scenario above.
 - **Verification:** `bun test`; one manual `omp` session edit attempt reporting the block reason.

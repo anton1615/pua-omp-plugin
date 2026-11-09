@@ -81,6 +81,10 @@ const BLOCK_PATTERNS: Array<[RegExp, string]> = [
 
 const WRITE_TOOLS = new Set(["edit", "write", "ast_edit", "apply_patch"]);
 const BACKSLASH = /\\/g;
+// omp's edits name their target inside the payload: hashline `[PATH#TAG]` sections,
+// patch-mode `*** ... File:` headers, and `MV DEST` moves.
+const HASHLINE_PATH = /^\[([^\]\n]+)#[0-9A-Fa-f]{4}\]/gm;
+const HASHLINE_MOVE = /^MV +(.+)$/gm;
 const PATCH_PATH = /^\*\*\* (?:Add File|Update File|Move to|Edit File|Delete File): *(.+)$/gm;
 
 function readJson<T>(file: string): T | null {
@@ -164,7 +168,7 @@ function restoreCheckpoint(): number | null {
   } catch {}
   const count = toCount(checkpoint.failures);
   if (count === null || (Number(checkpoint.saved_at) || 0) <= writtenAt) return null;
-  return count;
+  return Math.max(count, readFailureCount());
 }
 
 function toolPaths(input: unknown): string[] {
@@ -185,8 +189,15 @@ function toolPaths(input: unknown): string[] {
   }
   if (typeof record.input === "string") {
     for (const match of record.input.matchAll(PATCH_PATH)) paths.push(match[1].trim());
+    for (const match of record.input.matchAll(HASHLINE_PATH)) paths.push(match[1]);
+    for (const match of record.input.matchAll(HASHLINE_MOVE)) paths.push(match[1].trim());
   }
   return paths;
+}
+
+function normalizePath(raw: string): string {
+  // `write` accepts a copied `[path#TAG]` wrapper as its path.
+  return raw.replace(/^\[(.+)#[0-9A-Fa-f]{4}\]$/, "$1").replace(BACKSLASH, "/");
 }
 
 function behaviorPrompt(config: PuaConfig, failures: number): string {
@@ -262,7 +273,7 @@ export default function puaPiExtension(pi: ExtensionAPI) {
   pi.on("tool_call", (event) => {
     if (!WRITE_TOOLS.has(String(event?.toolName))) return;
     if (!enabled()) return;
-    const paths = toolPaths(event?.input).map((raw) => raw.replace(BACKSLASH, "/"));
+    const paths = toolPaths(event?.input).map(normalizePath);
     for (const path of paths) {
       for (const [pattern, reason] of BLOCK_PATTERNS) {
         if (pattern.test(path)) return { block: true, reason: `${reason} (${path})` };
@@ -291,13 +302,14 @@ export default function puaPiExtension(pi: ExtensionAPI) {
     if (!enabled()) return;
     stopNotified = true;
     ctx?.ui?.notify?.(
-      "[PUA] Session ending: report verification evidence (commands run, relevant output, remaining risk). No rating recorded.",
+      "[PUA] Stop check: report verification evidence (commands run, relevant output, remaining risk). No rating recorded.",
       "info",
     );
   });
 
   pi.on("before_agent_start", (event) => {
     if (!enabled()) return undefined;
+    failures = readFailureCount();
     if (event?.reason === "revive") return undefined;
     const matched = TRIGGER.test(String(event?.prompt ?? ""));
     const behavior = behaviorPrompt(config, failures) + (matched ? frustrationPrompt() : "");
