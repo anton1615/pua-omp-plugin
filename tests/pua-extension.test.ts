@@ -56,10 +56,12 @@ beforeEach(() => {
 
 describe("U1 frustration gate", () => {
   test("a trigger prompt adds the frustration paragraph", () => {
-    const result = start("please try harder");
-    expect(Array.isArray(result?.systemPrompt)).toBe(true);
-    expect(result?.systemPrompt).toHaveLength(2);
-    expect(result?.systemPrompt[1]).toContain("PUA_FRUSTRATION_SIGNAL");
+    for (const prompt of ["please try harder", "又错了"]) {
+      const result = start(prompt);
+      expect(Array.isArray(result?.systemPrompt)).toBe(true);
+      expect(result?.systemPrompt).toHaveLength(2);
+      expect(result?.systemPrompt[1]).toContain("PUA_FRUSTRATION_SIGNAL");
+    }
   });
 
   test("an ordinary prompt yields the base block only", () => {
@@ -67,11 +69,6 @@ describe("U1 frustration gate", () => {
     expect(result?.systemPrompt).toHaveLength(2);
     expect(result?.systemPrompt[1]).toContain("PUA_PI_CONTEXT");
     expect(result?.systemPrompt[1]).not.toContain("PUA_FRUSTRATION_SIGNAL");
-  });
-
-  test("a CJK trigger matches", () => {
-    const result = start("又错了");
-    expect(result?.systemPrompt[1]).toContain("PUA_FRUSTRATION_SIGNAL");
   });
 
   test("always_on false suppresses the override", () => {
@@ -126,7 +123,8 @@ describe("U3 integrity guard", () => {
   test("editing a test file is advisory, not blocking", () => {
     const result = guard("edit", { path: "tests/foo.test.ts" });
     expect(result?.block).toBeUndefined();
-    expect(result?.additionalContext).toBeTruthy();
+    expect(result?.additionalContext).toContain("tests/foo.test.ts");
+    expect(result?.additionalContext).toContain("weaken");
   });
 
   test("editing ordinary source returns nothing", () => {
@@ -201,5 +199,8 @@ describe("U4 compaction state and stop reminder", () => {
     emit("session_stop", {}, ctx);
     emit("session_stop", {}, ctx);
     expect(notes).toHaveLength(1);
+    emit("session_start");
+    emit("session_stop", {}, ctx);
+    expect(notes).toHaveLength(2);
   });
 });
