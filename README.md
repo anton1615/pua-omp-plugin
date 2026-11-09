@@ -4,6 +4,12 @@ PUA high-agency governance extension + skill, packaged for **omp (Oh My Pi)**.
 
 Derived from [`tanweai/pua`](https://github.com/tanweai/pua) `pi/package` (v3.5.1, MIT).
 
+This is a standalone derivative package, not a GitHub fork of the upstream repo:
+upstream has no root `package.json` (its installable unit is the `pi/package`
+subdirectory), and `omp plugin install` / bun git specs cannot address a
+subdirectory (`github:tanweai/pua#pi/package` resolves `pi/package` as a git ref).
+A fork would also mirror the whole upstream tree and cannot be narrowed.
+
 ## Why a fork
 
 omp passes `before_agent_start` `systemPrompt` as `string[]` (one entry per prompt
