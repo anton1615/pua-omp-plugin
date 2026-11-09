@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// The extension resolves ~/.pua once at import time, so HOME must move first.
 const HOME = mkdtempSync(join(tmpdir(), "pua-home-"));
 process.env.HOME = HOME;
 
@@ -186,6 +185,14 @@ describe("U4 compaction state and stop reminder", () => {
     rmSync(COUNTER, { force: true });
     emit("session_start");
     expect(start("hello")?.systemPrompt[1]).toContain("Pressure level: L2");
+  });
+
+  test("a stale checkpoint does not override the live counter", () => {
+    mkdirSync(PUA_DIR, { recursive: true });
+    writeFileSync(COUNTER, "5\n", "utf8");
+    writeFileSync(CHECKPOINT, JSON.stringify({ failures: 1, saved_at: 1 }) + "\n", "utf8");
+    emit("session_start");
+    expect(start("hello")?.systemPrompt[1]).toContain("5 recent failures");
   });
 
   test("the stop reminder fires once per session", () => {

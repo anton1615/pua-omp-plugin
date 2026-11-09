@@ -5,10 +5,9 @@
  * - keep /pua-on, /pua-off, /pua-status, /pua-reset behavior local/offline-friendly;
  * - share ~/.pua/config.json and ~/.pua/.failure_count with tanweai/pua;
  * - inject concise diligence context without owning permissions or network tools;
- * - mirror the Claude hook policy (frustration trigger, integrity guard) as ported data.
  */
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -81,35 +80,48 @@ const BLOCK_PATTERNS: Array<[RegExp, string]> = [
 ];
 
 const WRITE_TOOLS = new Set(["edit", "write", "ast_edit", "apply_patch"]);
+const BACKSLASH = /\\/g;
 const PATCH_PATH = /^\*\*\* (?:Add File|Update File|Move to|Edit File|Delete File): *(.+)$/gm;
 
-function readConfig(): PuaConfig {
+function readJson<T>(file: string): T | null {
   try {
-    if (existsSync(CONFIG)) return JSON.parse(readFileSync(CONFIG, "utf8"));
-  } catch {}
-  return {};
+    return JSON.parse(readFileSync(file, "utf8")) as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(file: string, value: unknown): void {
+  mkdirSync(PUA_DIR, { recursive: true });
+  writeFileSync(file, JSON.stringify(value, null, 2) + "\n", "utf8");
+}
+
+function readConfig(): PuaConfig {
+  return readJson<PuaConfig>(CONFIG) ?? {};
 }
 
 function writeConfig(patch: PuaConfig): PuaConfig {
-  mkdirSync(PUA_DIR, { recursive: true });
   const next = { ...readConfig(), ...patch };
-  writeFileSync(CONFIG, JSON.stringify(next, null, 2) + "\n", "utf8");
+  writeJson(CONFIG, next);
   return next;
+}
+
+function toCount(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
 }
 
 function readFailureCount(): number {
   try {
-    if (existsSync(FAILURE_COUNT)) {
-      const n = Number(readFileSync(FAILURE_COUNT, "utf8").trim());
-      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
-    }
-  } catch {}
-  return 0;
+    return toCount(readFileSync(FAILURE_COUNT, "utf8")) ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 function writeFailureCount(n: number): void {
   mkdirSync(PUA_DIR, { recursive: true });
-  writeFileSync(FAILURE_COUNT, String(Math.max(0, Math.floor(n))) + "\n", "utf8");
+  writeFileSync(FAILURE_COUNT, String(toCount(n) ?? 0) + "\n", "utf8");
 }
 
 function level(n: number): string {
@@ -120,7 +132,13 @@ function level(n: number): string {
   return "L0";
 }
 
-type ToolResultLike = { isError?: boolean; details?: { exitCode?: unknown }; exitCode?: unknown; exit_code?: unknown };
+type ToolResultLike = {
+  isError?: boolean;
+  toolName?: unknown;
+  details?: { exitCode?: unknown };
+  exitCode?: unknown;
+  exit_code?: unknown;
+};
 type EditEntry = { rename?: unknown };
 
 function exitCodeOf(value: unknown): number | undefined {
@@ -131,24 +149,22 @@ function isFailure(event: unknown): boolean {
   // Boundary: the host event is structural, so narrow only the fields the policy reads.
   const result = event as ToolResultLike | undefined;
   if (result?.isError === true) return true;
+  if (result?.toolName !== "bash") return false;
   const exitCode =
     exitCodeOf(result?.details?.exitCode) ?? exitCodeOf(result?.exitCode) ?? exitCodeOf(result?.exit_code);
   return exitCode !== undefined && exitCode !== 0;
 }
 
-// R6: a checkpoint newer than the live counter replaces it for this session.
 function restoreCheckpoint(): number | null {
+  const checkpoint = readJson<Checkpoint>(CHECKPOINT);
+  if (!checkpoint) return null;
+  let writtenAt = 0;
   try {
-    if (!existsSync(CHECKPOINT)) return null;
-    const checkpoint: Checkpoint = JSON.parse(readFileSync(CHECKPOINT, "utf8"));
-    const savedAt = Number(checkpoint?.saved_at) || 0;
-    const writtenAt = existsSync(FAILURE_COUNT) ? statSync(FAILURE_COUNT).mtimeMs : 0;
-    const count = Number(checkpoint?.failures);
-    if (!Number.isFinite(count) || savedAt <= writtenAt) return null;
-    return Math.max(0, Math.floor(count));
-  } catch {
-    return null;
-  }
+    writtenAt = statSync(FAILURE_COUNT).mtimeMs;
+  } catch {}
+  const count = toCount(checkpoint.failures);
+  if (count === null || (Number(checkpoint.saved_at) || 0) <= writtenAt) return null;
+  return count;
 }
 
 function toolPaths(input: unknown): string[] {
@@ -187,11 +203,16 @@ export default function puaPiExtension(pi: ExtensionAPI) {
   let failures = readFailureCount();
   let stopNotified = false;
 
+  function enabled(): boolean {
+    config = readConfig();
+    return config.always_on !== false;
+  }
+
   pi.on("session_start", () => {
     config = readConfig();
-    failures = readFailureCount();
     const restored = restoreCheckpoint();
-    if (restored !== null) failures = restored;
+    failures = restored ?? readFailureCount();
+    if (restored !== null) writeFailureCount(restored);
     stopNotified = false;
   });
 
@@ -232,18 +253,16 @@ export default function puaPiExtension(pi: ExtensionAPI) {
   });
 
   pi.on("tool_result", (event) => {
-    config = readConfig();
-    if (config.always_on === false) return;
     if (!isFailure(event)) return;
-    failures = failures + 1;
+    if (!enabled()) return;
+    failures = readFailureCount() + 1;
     writeFailureCount(failures);
   });
 
   pi.on("tool_call", (event) => {
-    config = readConfig();
-    if (config.always_on === false) return;
     if (!WRITE_TOOLS.has(String(event?.toolName))) return;
-    const paths = toolPaths(event?.input).map((raw) => raw.replace(/\\/g, "/"));
+    if (!enabled()) return;
+    const paths = toolPaths(event?.input).map((raw) => raw.replace(BACKSLASH, "/"));
     for (const path of paths) {
       for (const [pattern, reason] of BLOCK_PATTERNS) {
         if (pattern.test(path)) return { block: true, reason: `${reason} (${path})` };
@@ -257,21 +276,19 @@ export default function puaPiExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_before_compact", () => {
-    config = readConfig();
-    if (config.always_on === false) return;
+    if (!enabled()) return;
     const checkpoint: Checkpoint = {
       level: level(failures),
       failures,
       flavor: config.flavor || "alibaba",
       saved_at: Date.now(),
     };
-    mkdirSync(PUA_DIR, { recursive: true });
-    writeFileSync(CHECKPOINT, JSON.stringify(checkpoint, null, 2) + "\n", "utf8");
+    writeJson(CHECKPOINT, checkpoint);
   });
 
   pi.on("session_stop", (_event, ctx) => {
-    config = readConfig();
-    if (config.always_on === false || stopNotified) return;
+    if (stopNotified) return;
+    if (!enabled()) return;
     stopNotified = true;
     ctx?.ui?.notify?.(
       "[PUA] Session ending: report verification evidence (commands run, relevant output, remaining risk). No rating recorded.",
@@ -280,8 +297,7 @@ export default function puaPiExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", (event) => {
-    config = readConfig();
-    if (config.always_on === false) return undefined;
+    if (!enabled()) return undefined;
     if (event?.reason === "revive") return undefined;
     const matched = TRIGGER.test(String(event?.prompt ?? ""));
     const behavior = behaviorPrompt(config, failures) + (matched ? frustrationPrompt() : "");
