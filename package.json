@@ -1,7 +1,7 @@
 {
   "name": "pua-omp-plugin",
-  "version": "3.5.1-omp.1",
-  "description": "PUA high-agency governance extension + skill for omp (Oh My Pi). Derived from tanweai/pua with string[]-aware before_agent_start.",
+  "version": "3.6.0-omp.1",
+  "description": "PUA high-agency governance extension + skill for omp (Oh My Pi). Claude hook parity: frustration gate, pressure accounting, integrity guard, compaction state.",
   "type": "module",
   "license": "MIT",
   "repository": {

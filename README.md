@@ -25,7 +25,39 @@ const base = event?.systemPrompt;
 const systemPrompt = Array.isArray(base) ? [...base, behavior] : `${String(base ?? "")}${behavior}`;
 ```
 
-That is the only behavioural change; it is a no-op on upstream Pi.
+That shape adaption remains; on upstream Pi it is a no-op.
+
+## Claude Code hook parity
+
+The Claude Code plugin gates its context on user frustration and keeps failure
+pressure that successes never reset. This extension ports that policy:
+
+- **Frustration gate.** The base context block is injected on every enabled turn.
+  When the submitted prompt matches the trigger set from
+  `hooks/frustration-trigger.sh` (single regex, CJK included), an extra
+  frustration paragraph is appended. Matching uses the prompt text
+  `before_agent_start` already carries, so it works in every mode, including
+  print mode.
+- **Pressure accounting.** Only failed tool calls increment `~/.pua/.failure_count`
+  (an error result, or a non-zero exit code); a successful call never resets it.
+- **Integrity guard.** Writes that name a protected path are refused with the
+  ported reason: CI config, scoring/grader/verifier assets, hidden-solution
+  artifacts, secrets, status/progress files, and memory files. Test-file writes
+  pass with a passive warning instead of a block.
+- **Compaction state.** `session_before_compact` writes
+  `~/.pua/checkpoint.json` (`level`, `failures`, `flavor`, `saved_at`); a newer
+  checkpoint than the live counter is restored on session start.
+- **Stop reminder.** `session_stop` (the per-turn stop hook) emits one visible
+  completion reminder, at the first stop of a session, and records no rating.
+
+### Documented divergences from the Claude hooks
+
+| Divergence | Why |
+|---|---|
+| Test-file writes are advisory, not blocked | omp runs (including this repo's own `ce-work` runs) author tests; a hard block makes the plugin unusable. Evidence that would flip this: a run where the model weakened an existing assertion after the warning. |
+| Shell-mediated writes are not intercepted | The guard inspects tools that name a file; a `bash` redirect into a protected path passes. Porting the Claude mutating-command heuristic is deferred. |
+| `ast_edit` rewrites apply unguarded | `ast_edit` only previews; the apply pass is a `write` to `xd://resolve`, which names staged state rather than a file, so a globbed rewrite can reach a protected path. |
+| No blocking stop loop, subagent teardown, or survey rating | omp's `session_stop` continuation cap, the absence of a subagent-stop event, and the interactive rating flow are out of scope for the extension. |
 
 ## Install
 
